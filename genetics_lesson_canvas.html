@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Science, Ethics and Argument — Lesson Canvas</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&display=swap');
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:#0f0f0f;font-family:'Inter',sans-serif;overflow:hidden;width:100vw;height:100vh;cursor:grab;}
+body.drawing{cursor:crosshair;}
+body.panning{cursor:grabbing;}
+#canvas-wrap{position:fixed;inset:0;overflow:hidden;}
+#canvas{position:absolute;transform-origin:0 0;}
+#draw-layer{position:fixed;inset:0;z-index:1000;pointer-events:none;}
+#draw-layer.active{pointer-events:all;}
+#toolbar{position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:2000;display:flex;align-items:center;gap:8px;background:rgba(20,20,20,0.95);border:0.5px solid rgba(255,255,255,0.12);border-radius:40px;padding:8px 16px;backdrop-filter:blur(10px);}
+.tb-btn{background:none;border:none;color:rgba(255,255,255,0.6);cursor:pointer;font-size:13px;padding:6px 12px;border-radius:20px;font-family:inherit;transition:all 0.12s;display:flex;align-items:center;gap:5px;}
+.tb-btn:hover{background:rgba(255,255,255,0.1);color:#fff;}
+.tb-btn.active{background:rgba(255,255,255,0.15);color:#fff;}
+.tb-sep{width:1px;height:20px;background:rgba(255,255,255,0.12);}
+.color-dot{width:14px;height:14px;border-radius:50%;cursor:pointer;border:2px solid transparent;transition:border-color 0.12s;}
+.color-dot.selected{border-color:#fff;}
+.zone-nav{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:2000;display:flex;gap:6px;background:rgba(20,20,20,0.95);border:0.5px solid rgba(255,255,255,0.12);border-radius:40px;padding:8px 16px;backdrop-filter:blur(10px);}
+.zone-btn{background:none;border:none;color:rgba(255,255,255,0.5);cursor:pointer;font-size:12px;padding:5px 12px;border-radius:20px;font-family:inherit;transition:all 0.12s;white-space:nowrap;}
+.zone-btn:hover{background:rgba(255,255,255,0.1);color:#fff;}
+.hint{position:fixed;bottom:20px;right:20px;z-index:2000;font-size:11px;color:rgba(255,255,255,0.25);line-height:1.6;}
+</style>
+</head>
+<body>
+<div id="canvas-wrap"><div id="canvas"></div></div>
+<canvas id="draw-layer"></canvas>
+
+<div id="toolbar">
+  <button class="tb-btn active" id="btn-pan" onclick="setMode('pan')">✋ Pan</button>
+  <div class="tb-sep"></div>
+  <button class="tb-btn" id="btn-draw" onclick="setMode('draw')">✏️ Draw</button>
+  <div class="color-dot selected" style="background:#ffffff;" onclick="setColor('#ffffff')" id="c-white"></div>
+  <div class="color-dot" style="background:#ef4444;" onclick="setColor('#ef4444')" id="c-red"></div>
+  <div class="color-dot" style="background:#22c55e;" onclick="setColor('#22c55e')" id="c-green"></div>
+  <div class="color-dot" style="background:#3b82f6;" onclick="setColor('#3b82f6')" id="c-blue"></div>
+  <div class="color-dot" style="background:#f59e0b;" onclick="setColor('#f59e0b')" id="c-amber"></div>
+  <button class="tb-btn" onclick="clearDrawing()">🗑 Clear</button>
+  <div class="tb-sep"></div>
+  <button class="tb-btn" onclick="zoomIn()">＋</button>
+  <button class="tb-btn" onclick="zoomOut()">－</button>
+  <button class="tb-btn" onclick="zoomReset()">⊙ Reset</button>
+</div>
+
+<div class="zone-nav">
+  <button class="zone-btn" onclick="goTo(0)">① Starter</button>
+  <button class="zone-btn" onclick="goTo(1)">② Objectives</button>
+  <button class="zone-btn" onclick="goTo(2)">③ Clips</button>
+  <button class="zone-btn" onclick="goTo(3)">④ Group Work</button>
+  <button class="zone-btn" onclick="goTo(4)">⑤ Writing Frame</button>
+  <button class="zone-btn" onclick="goTo(5)">⑥ Model Answers</button>
+  <button class="zone-btn" onclick="goTo(6)">⑦ Exit</button>
+</div>
+
+<div class="hint">Scroll to zoom · Drag to pan · Draw mode to annotate</div>
+
+<script>
+const ZONES = [
+  {x:80, y:80, w:900, h:700},
+  {x:80, y:840, w:900, h:400},
+  {x:80, y:1300, w:900, h:380},
+  {x:1060, y:80, w:1100, h:1600},
+  {x:2240, y:80, w:820, h:780},
+  {x:2240, y:920, w:820, h:800},
+  {x:3140, y:80, w:700, h:500},
+];
+
+let scale = 0.55, panX = 0, panY = 0;
+let isPanning = false, startX, startY, startPanX, startPanY;
+let mode = 'pan';
+let drawColor = '#ffffff';
+let drawCtx, isDrawing = false, lastX, lastY;
+
+function buildCanvas() {
+  const c = document.getElementById('canvas');
+  c.innerHTML = `
+  ${starterZone()}
+  ${objectivesZone()}
+  ${clipsZone()}
+  ${groupWorkZone()}
+  ${writingFrameZone()}
+  ${modelAnswersZone()}
+  ${exitZone()}
+  `;
+  applyTransform();
+}
+
+function starterZone() {
+  return `
+  <div style="position:absolute;left:80px;top:80px;width:900px;">
+    <div style="font-size:11px;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;color:rgba(255,255,255,0.3);margin-bottom:16px;">① Starter — as you walk in</div>
+    <div style="font-size:28px;font-weight:900;color:#fff;line-height:1.1;margin-bottom:8px;">Not all arguments are equal.</div>
+    <div style="font-size:16px;color:rgba(255,255,255,0.4);margin-bottom:32px;">For each quote — write one word: <span style="color:#ef4444;font-weight:600;">OPINION</span> &nbsp; <span style="color:#f59e0b;font-weight:600;">REASONING</span> &nbsp; <span style="color:#22c55e;font-weight:600;">EVIDENCE</span></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;">
+      ${quoteCard('#ef4444','Quote 1','💬','GM food is disgusting and unnatural. I would never eat it.','Anonymous social media comment','OPINION','A personal feeling. No reason given.')}
+      ${quoteCard('#f59e0b','Quote 2','🧠','If we allow scientists to edit embryos, what stops us from choosing children like products?','Bioethicist — structured argument','REASONING','A logical argument — but no data to back it up.')}
+      ${quoteCard('#22c55e','Quote 3','📊','In a study of 6,000 patients, gene therapy reduced symptoms in 93% of cases with no serious side effects.','Clinical trial summary','EVIDENCE','A specific claim from a real study that can be tested.')}
+    </div>
+  </div>`;
+}
+
+function quoteCard(color, label, icon, quote, source, answer, why) {
+  return `
+  <div style="background:rgba(255,255,255,0.04);border:0.5px solid rgba(255,255,255,0.1);border-top:3px solid ${color};border-radius:12px;padding:20px;">
+    <div style="font-size:11px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:${color};margin-bottom:12px;">${label}</div>
+    <div style="font-size:22px;margin-bottom:12px;">${icon}</div>
+    <div style="font-size:15px;color:#fff;font-style:italic;line-height:1.6;margin-bottom:12px;">"${quote}"</div>
+    <div style="font-size:12px;color:rgba(255,255,255,0.35);margin-bottom:16px;">— ${source}</div>
+    <div style="border-top:0.5px solid rgba(255,255,255,0.08);padding-top:12px;">
+      <div style="font-size:11px;font-weight:600;color:${color};margin-bottom:4px;">Answer: ${answer}</div>
+      <div style="font-size:12px;color:rgba(255,255,255,0.4);">${why}</div>
+    </div>
+  </div>`;
+}
+
+function objectivesZone() {
+  return `
+  <div style="position:absolute;left:80px;top:840px;width:900px;">
+    <div style="font-size:11px;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;color:rgba(255,255,255,0.3);margin-bottom:16px;">② Learning objectives</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
+      ${loCard('LO1','#3b82f6','Tell the difference between opinion, reasoning and evidence in a scientific argument.')}
+      ${loCard('LO2','#a855f7','Identify arguments for and against genetic screening from different points of view.')}
+      ${loCard('LO3','#ef4444','Write a full evaluate answer with benefits, risks and a justified conclusion.')}
+    </div>
+  </div>`;
+}
+
+function loCard(num, color, text) {
+  return `
+  <div style="background:rgba(255,255,255,0.04);border:0.5px solid rgba(255,255,255,0.08);border-radius:12px;padding:20px;">
+    <div style="font-size:28px;font-weight:900;color:${color};margin-bottom:8px;">${num}</div>
+    <div style="font-size:14px;color:rgba(255,255,255,0.8);line-height:1.6;">${text}</div>
+  </div>`;
+}
+
+function clipsZone() {
+  return `
+  <div style="position:absolute;left:80px;top:1300px;width:900px;">
+    <div style="font-size:11px;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;color:rgba(255,255,255,0.3);margin-bottom:16px;">③ Watch these clips</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+      <div style="background:rgba(255,255,255,0.04);border:0.5px solid rgba(255,255,255,0.1);border-radius:12px;padding:20px;">
+        <div style="font-size:11px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:#f59e0b;margin-bottom:10px;">Clip 1 · ~90 seconds</div>
+        <div style="font-size:17px;font-weight:700;color:#fff;margin-bottom:8px;">Jurassic Park</div>
+        <div style="font-size:13px;color:rgba(255,255,255,0.5);line-height:1.6;margin-bottom:16px;">Jeff Goldblum: "Your scientists were so preoccupied with whether they could, they didn't stop to think whether they should."</div>
+        <a href="https://www.youtube.com/results?search_query=jurassic+park+life+finds+a+way+should+vs+could" target="_blank" style="display:inline-block;background:#f59e0b;color:#000;font-size:12px;font-weight:700;padding:8px 16px;border-radius:20px;text-decoration:none;">▶ Find on YouTube</a>
+      </div>
+      <div style="background:rgba(255,255,255,0.04);border:0.5px solid rgba(255,255,255,0.1);border-radius:12px;padding:20px;">
+        <div style="font-size:11px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:#ef4444;margin-bottom:10px;">Clip 2 · ~2 minutes</div>
+        <div style="font-size:17px;font-weight:700;color:#fff;margin-bottom:8px;">CRISPR Babies — Real News</div>
+        <div style="font-size:13px;color:rgba(255,255,255,0.5);line-height:1.6;margin-bottom:16px;">He Jiankui announces the first gene-edited babies, 2018. He was jailed. This actually happened.</div>
+        <a href="https://www.youtube.com/results?search_query=crispr+babies+he+jiankui+bbc+news+2018" target="_blank" style="display:inline-block;background:#ef4444;color:#fff;font-size:12px;font-weight:700;padding:8px 16px;border-radius:20px;text-decoration:none;">▶ Find on YouTube</a>
+      </div>
+    </div>
+    <div style="margin-top:16px;background:rgba(255,255,255,0.03);border-radius:8px;padding:12px 16px;font-size:13px;color:rgba(255,255,255,0.4);">After watching — think: is He Jiankui's argument opinion, reasoning or evidence? Was the science wrong, or the person?</div>
+  </div>`;
+}
+
+function groupWorkZone() {
+  const groups = [
+    {id:'G1', color:'#3b82f6', label:'Group 1 — Science', for:'Genetic screening can detect over 200 conditions accurately. Only healthy embryos are implanted.', against:'Removing a cell from an 8-cell embryo can reduce its chance of survival.'},
+    {id:'G2', color:'#f59e0b', label:'Group 2 — Money', for:'Preventing inherited disease saves healthcare systems huge amounts of money long-term.', against:'It costs thousands of pounds — only wealthy families can access it. This is deeply unfair.'},
+    {id:'G3', color:'#ec4899', label:'Group 3 — Rights', for:'Parents have the right to use science to protect their child from serious suffering.', against:'Discarded embryos cannot consent. They have no voice in this process.'},
+    {id:'G4', color:'#22c55e', label:'Group 4 — Population', for:'Stopping a disease now protects whole family lines for generations.', against:'If everyone avoids the same genes, human genetic variety could decrease over time.'},
+    {id:'G5', color:'#a855f7', label:'Group 5 — Ethics', for:'If technology can prevent serious suffering, not using it needs a good reason.', against:'Choosing which embryos are acceptable is similar to ideas that caused great harm in history.'},
+    {id:'G6', color:'#14b8a6', label:'Group 6 — Religion', for:'Many faiths support using medicine to prevent suffering and protect health.', against:'If life begins at fertilisation, discarding any embryo for any reason is morally wrong.'},
+  ];
+  return `
+  <div style="position:absolute;left:1060px;top:80px;width:1100px;">
+    <div style="font-size:11px;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;color:rgba(255,255,255,0.3);margin-bottom:8px;">④ Group argument work</div>
+    <div style="font-size:22px;font-weight:800;color:#fff;margin-bottom:4px;">Should embryos be tested for inherited diseases before being placed in the womb?</div>
+    <div style="font-size:14px;color:rgba(255,255,255,0.4);margin-bottom:24px;">Find your group. Read your cards. Agree one sentence FOR and one AGAINST. Come and write them on the board. No opinions — give a reason.</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:24px;">
+    ${groups.map(g=>`
+      <div style="background:rgba(255,255,255,0.03);border:0.5px solid rgba(255,255,255,0.08);border-left:3px solid ${g.color};border-radius:12px;padding:16px;">
+        <div style="font-size:12px;font-weight:700;color:${g.color};margin-bottom:10px;">${g.label}</div>
+        <div style="font-size:12px;color:rgba(255,255,255,0.35);font-weight:600;margin-bottom:4px;">FOR ✓</div>
+        <div style="font-size:13px;color:rgba(255,255,255,0.7);line-height:1.5;margin-bottom:10px;">${g.for}</div>
+        <div style="font-size:12px;color:rgba(255,255,255,0.35);font-weight:600;margin-bottom:4px;">AGAINST ✗</div>
+        <div style="font-size:13px;color:rgba(255,255,255,0.7);line-height:1.5;">${g.against}</div>
+      </div>`).join('')}
+    </div>
+    <div style="background:rgba(255,255,255,0.04);border-radius:10px;padding:14px 18px;font-size:13px;color:rgba(255,255,255,0.4);line-height:1.6;">
+      📱 Scan QR for interactive cards on your device &nbsp;·&nbsp; 
+      <a href="https://vegasrocks2011.github.io/fictional-waddle/argument_cards_genetic_screening_simple.html" target="_blank" style="color:#3b82f6;text-decoration:none;font-weight:600;">Open argument cards →</a>
+    </div>
+  </div>`;
+}
+
+function writingFrameZone() {
+  return `
+  <div style="position:absolute;left:2240px;top:80px;width:820px;">
+    <div style="font-size:11px;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;color:rgba(255,255,255,0.3);margin-bottom:16px;">⑤ Writing frame</div>
+    <div style="background:rgba(59,130,246,0.08);border:0.5px solid rgba(59,130,246,0.3);border-radius:12px;padding:18px;margin-bottom:20px;">
+      <div style="font-size:11px;font-weight:600;color:#60a5fa;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.06em;">Exam question — 6 marks</div>
+      <div style="font-size:16px;font-weight:600;color:#fff;line-height:1.5;">Evaluate the use of genetic screening to test embryos for inherited diseases before implantation.</div>
+      <div style="font-size:12px;color:rgba(255,255,255,0.35);margin-top:6px;">2 benefits · 2 risks or ethical concerns · conclusion with judgement</div>
+    </div>
+    ${frameRow('#22c55e','Benefit 1','One benefit of genetic screening is that... <span style="opacity:0.4">→ explain what happens and why it helps</span>')}
+    ${frameRow('#22c55e','Benefit 2','A further advantage is that... <span style="opacity:0.4">→ this means that... because...</span>')}
+    ${frameRow('#ef4444','Risk / ethical concern 1','However, there are concerns about... <span style="opacity:0.4">→ this could lead to... because...</span>')}
+    ${frameRow('#ef4444','Risk / ethical concern 2','Some people also argue that... <span style="opacity:0.4">→ because...</span>')}
+    ${frameRow('#f59e0b','Conclusion — where marks are won','On balance, I think genetic screening should / should not be used because... The most important reason is... <span style="opacity:0.4">→ make a judgement — do not just list both sides</span>')}
+    <div style="margin-top:16px;background:rgba(255,255,255,0.03);border-radius:8px;padding:12px 16px;font-size:12px;color:rgba(255,255,255,0.35);line-height:1.6;">Every sentence needs a "because". No opinions. The conclusion must say which side is stronger and why.</div>
+  </div>`;
+}
+
+function frameRow(color, label, text) {
+  return `
+  <div style="border-left:3px solid ${color};background:rgba(255,255,255,0.03);border-radius:0 8px 8px 0;padding:12px 16px;margin-bottom:10px;">
+    <div style="font-size:11px;font-weight:600;color:${color};text-transform:uppercase;letter-spacing:0.06em;margin-bottom:5px;">${label}</div>
+    <div style="font-size:13px;color:rgba(255,255,255,0.7);line-height:1.6;">${text}</div>
+  </div>`;
+}
+
+function modelAnswersZone() {
+  const low = {
+    label:'Student A', mark:'2 / 6', color:'#ef4444',
+    desc:'One perspective · undeveloped · no real conclusion',
+    parts:[
+      {text:'Genetic screening is good because it helps parents find out if their baby will have a disease.', p:'', c:'rgba(255,255,255,0.75)'},
+      {text:' This is useful for families.', p:'', c:'rgba(255,255,255,0.75)'},
+      {text:' But some people think it is wrong because it is not natural.', p:'', c:'rgba(255,255,255,0.75)'},
+      {text:' Also it costs a lot of money.', p:'', c:'rgba(255,255,255,0.75)'},
+      {text:' Overall I think it is good because it helps families.', p:'', c:'rgba(255,255,255,0.75)'},
+    ],
+    feedback:['One benefit mentioned but not explained','Cost mentioned but not developed','"Not natural" is an opinion — no reasoning','Conclusion is just an opinion — no judgement','No second benefit or risk']
+  };
+  const mid = {
+    label:'Student B', mark:'4 / 6', color:'#f59e0b',
+    desc:'Two perspectives · developed points · weak conclusion',
+    parts:[
+      {text:'One benefit of genetic screening is that it can detect serious conditions like cystic fibrosis before a baby is born.', p:'Science', c:'#93c5fd'},
+      {text:' This means parents can choose to only implant a healthy embryo, preventing the child from suffering.', p:'Science', c:'#93c5fd'},
+      {text:' Another benefit is that it reduces the long-term cost of treating these conditions.', p:'Money', c:'#fcd34d'},
+      {text:' However, some embryos are discarded, which raises ethical concerns about the right to life.', p:'Ethics', c:'#c4b5fd'},
+      {text:' There are also concerns that only wealthy families can afford this treatment.', p:'Money', c:'#fcd34d'},
+      {text:' Overall there are both benefits and risks to genetic screening.', p:'', c:'rgba(255,255,255,0.5)'},
+    ],
+    feedback:['Two benefits, both explained','Two concerns developed','Ethical concern included','Conclusion only restates both sides — no judgement','Rewrite the last sentence to gain 2 more marks']
+  };
+  const high = {
+    label:'Student C', mark:'6 / 6', color:'#22c55e',
+    desc:'Three perspectives · strong conclusion · full marks',
+    parts:[
+      {text:'One benefit of genetic screening is that it can detect over 200 serious inherited conditions in an embryo before it is placed in the womb.', p:'Science', c:'#93c5fd'},
+      {text:' This means parents who carry genes for conditions like Huntington\'s disease can ensure only a healthy embryo is used, preventing the child from suffering or dying young.', p:'Science', c:'#93c5fd'},
+      {text:' A further advantage is that preventing these conditions reduces long-term treatment costs, freeing up healthcare resources for other patients.', p:'Money', c:'#fcd34d'},
+      {text:' However, embryos that carry disease genes are discarded in this process. Many people argue this is ethically wrong because the embryo cannot consent and may have a right to life.', p:'Rights', c:'#f9a8d4'},
+      {text:' There are also concerns that genetic screening is only available to wealthy families, making it deeply unfair.', p:'Money', c:'#fcd34d'},
+      {text:' On balance, genetic screening should be permitted for serious life-threatening conditions because the benefit of preventing severe suffering outweighs the ethical concerns, provided it is regulated and made available regardless of income.', p:'Conclusion', c:'#fde68a'},
+    ],
+    feedback:['Two benefits, specific and explained','Scientific risk/ethical concern developed','Rights-based concern included','Economic thread runs through both sides','Conclusion makes a clear judgement','Conclusion explains why one side wins','Conditions acknowledged — "provided..."']
+  };
+
+  function renderAnswer(a) {
+    const tickCross = a.color === '#ef4444' ? '✗' : '✓';
+    return `
+    <div style="background:rgba(255,255,255,0.03);border:0.5px solid rgba(255,255,255,0.08);border-top:3px solid ${a.color};border-radius:12px;overflow:hidden;">
+      <div style="padding:14px 16px;border-bottom:0.5px solid rgba(255,255,255,0.06);display:flex;justify-content:space-between;align-items:center;">
+        <div>
+          <div style="font-size:13px;font-weight:700;color:${a.color};">${a.label}</div>
+          <div style="font-size:11px;color:rgba(255,255,255,0.3);margin-top:2px;">${a.desc}</div>
+        </div>
+        <div style="font-size:20px;font-weight:800;color:${a.color};">${a.mark}</div>
+      </div>
+      <div style="padding:14px 16px;font-size:13px;line-height:1.8;border-bottom:0.5px solid rgba(255,255,255,0.06);">
+        ${a.parts.map(p=>`<span style="background:${p.p ? p.c+'22' : 'transparent'};color:${p.c};border-radius:3px;padding:0 2px;" title="${p.p}">${p.text}</span>${p.p ? `<sup style="font-size:9px;color:${p.c};opacity:0.7;"> ${p.p}</sup>` : ''}`).join('')}
+      </div>
+      <div style="padding:12px 16px;">
+        ${a.feedback.map((f,i)=>`<div style="font-size:11px;color:${i===a.feedback.length-1&&a.color==='#ef4444'?'#ef4444':i===a.feedback.length-1&&a.color==='#f59e0b'?'#f59e0b':'rgba(255,255,255,0.4)'};padding:2px 0 2px 16px;position:relative;"><span style="position:absolute;left:0;color:${a.color};">${a.color==='#ef4444'&&i>1?'✗':'✓'}</span>${f}</div>`).join('')}
+      </div>
+    </div>`;
+  }
+
+  return `
+  <div style="position:absolute;left:2240px;top:920px;width:820px;">
+    <div style="font-size:11px;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;color:rgba(255,255,255,0.3);margin-bottom:8px;">⑥ Model answers — mark before you reveal</div>
+    <div style="font-size:12px;color:rgba(255,255,255,0.3);margin-bottom:16px;">Colour shows which perspective each sentence uses. Can you see the arguments from your group in the answers?</div>
+    <div style="display:flex;gap:10px;margin-bottom:12px;">
+      ${['#93c5fd:Science','#fcd34d:Money','#f9a8d4:Rights','#c4b5fd:Ethics','#6ee7b7:Population','#5eead4:Religion','#fde68a:Conclusion'].map(x=>{const[c,l]=x.split(':');return`<div style="display:flex;align-items:center;gap:4px;"><div style="width:10px;height:10px;border-radius:2px;background:${c}22;border:1px solid ${c};"></div><span style="font-size:10px;color:rgba(255,255,255,0.4);">${l}</span></div>`;}).join('')}
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;">
+      ${renderAnswer(low)}
+      ${renderAnswer(mid)}
+      ${renderAnswer(high)}
+    </div>
+  </div>`;
+}
+
+function exitZone() {
+  return `
+  <div style="position:absolute;left:3140px;top:80px;width:700px;">
+    <div style="font-size:11px;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;color:rgba(255,255,255,0.3);margin-bottom:16px;">⑦ Exit ticket</div>
+    <div style="font-size:32px;font-weight:900;color:#fff;line-height:1.1;margin-bottom:8px;">"Not all arguments are equal."</div>
+    <div style="font-size:16px;color:rgba(255,255,255,0.4);margin-bottom:32px;">How do we decide which ones to trust?</div>
+    <div style="background:rgba(255,255,255,0.04);border:0.5px solid rgba(255,255,255,0.1);border-radius:12px;padding:20px;margin-bottom:16px;">
+      <div style="font-size:12px;font-weight:600;color:rgba(255,255,255,0.4);margin-bottom:12px;text-transform:uppercase;letter-spacing:0.06em;">On your Post-it — one sentence</div>
+      <div style="font-size:14px;color:rgba(255,255,255,0.7);line-height:1.7;margin-bottom:12px;">Write one sentence that answers the lesson question. Use something you know now that you didn't know at the start.</div>
+      <div style="font-size:13px;color:rgba(255,255,255,0.4);font-style:italic;">"We decide which arguments to trust by looking for... because..."</div>
+    </div>
+    <div style="background:rgba(255,255,255,0.03);border-radius:10px;padding:16px 20px;">
+      <div style="font-size:12px;font-weight:600;color:rgba(255,255,255,0.3);margin-bottom:10px;text-transform:uppercase;letter-spacing:0.06em;">Coming next — 3 week project</div>
+      <div style="font-size:13px;color:rgba(255,255,255,0.5);line-height:1.7;">Choose a genetics ethics topic. Research it. Build your arguments. Present and defend your position. Full brief coming in lesson 2.</div>
+    </div>
+  </div>`;
+}
+
+function applyTransform() {
+  const c = document.getElementById('canvas');
+  c.style.transform = `translate(${panX}px,${panY}px) scale(${scale})`;
+}
+
+function goTo(idx) {
+  const z = ZONES[idx];
+  const vw = window.innerWidth, vh = window.innerHeight;
+  const zw = z.w * scale, zh = z.h * scale;
+  panX = (vw/2) - (z.x * scale) - (zw/2);
+  panY = (vh/2) - (z.y * scale) - (zh/2);
+  applyTransform();
+}
+
+function zoomIn() { scale = Math.min(scale*1.25, 3); applyTransform(); }
+function zoomOut() { scale = Math.max(scale*0.8, 0.15); applyTransform(); }
+function zoomReset() { scale=0.55; panX=0; panY=0; applyTransform(); }
+
+function setMode(m) {
+  mode = m;
+  document.getElementById('btn-pan').classList.toggle('active', m==='pan');
+  document.getElementById('btn-draw').classList.toggle('active', m==='draw');
+  document.getElementById('draw-layer').classList.toggle('active', m==='draw');
+  document.body.classList.toggle('drawing', m==='draw');
+}
+
+function setColor(c) {
+  drawColor = c;
+  document.querySelectorAll('.color-dot').forEach(d=>d.classList.remove('selected'));
+  const map={'#ffffff':'c-white','#ef4444':'c-red','#22c55e':'c-green','#3b82f6':'c-blue','#f59e0b':'c-amber'};
+  if(map[c]) document.getElementById(map[c]).classList.add('selected');
+}
+
+function clearDrawing() {
+  const cv = document.getElementById('draw-layer');
+  drawCtx.clearRect(0,0,cv.width,cv.height);
+}
+
+function initDraw() {
+  const cv = document.getElementById('draw-layer');
+  cv.width = window.innerWidth;
+  cv.height = window.innerHeight;
+  drawCtx = cv.getContext('2d');
+
+  cv.addEventListener('mousedown', e=>{
+    isDrawing=true;
+    lastX=e.clientX; lastY=e.clientY;
+  });
+  cv.addEventListener('mousemove', e=>{
+    if(!isDrawing) return;
+    drawCtx.beginPath();
+    drawCtx.moveTo(lastX,lastY);
+    drawCtx.lineTo(e.clientX,e.clientY);
+    drawCtx.strokeStyle=drawColor;
+    drawCtx.lineWidth=3;
+    drawCtx.lineCap='round';
+    drawCtx.stroke();
+    lastX=e.clientX; lastY=e.clientY;
+  });
+  cv.addEventListener('mouseup',()=>isDrawing=false);
+  cv.addEventListener('mouseleave',()=>isDrawing=false);
+
+  cv.addEventListener('touchstart',e=>{
+    e.preventDefault();
+    const t=e.touches[0];
+    isDrawing=true; lastX=t.clientX; lastY=t.clientY;
+  },{passive:false});
+  cv.addEventListener('touchmove',e=>{
+    e.preventDefault();
+    if(!isDrawing) return;
+    const t=e.touches[0];
+    drawCtx.beginPath();
+    drawCtx.moveTo(lastX,lastY);
+    drawCtx.lineTo(t.clientX,t.clientY);
+    drawCtx.strokeStyle=drawColor;
+    drawCtx.lineWidth=3;
+    drawCtx.lineCap='round';
+    drawCtx.stroke();
+    lastX=t.clientX; lastY=t.clientY;
+  },{passive:false});
+  cv.addEventListener('touchend',()=>isDrawing=false);
+}
+
+const wrap = document.getElementById('canvas-wrap');
+wrap.addEventListener('mousedown',e=>{
+  if(mode!=='pan') return;
+  isPanning=true;
+  startX=e.clientX; startY=e.clientY;
+  startPanX=panX; startPanY=panY;
+  document.body.classList.add('panning');
+});
+window.addEventListener('mousemove',e=>{
+  if(!isPanning) return;
+  panX=startPanX+(e.clientX-startX);
+  panY=startPanY+(e.clientY-startY);
+  applyTransform();
+});
+window.addEventListener('mouseup',()=>{isPanning=false;document.body.classList.remove('panning');});
+
+wrap.addEventListener('touchstart',e=>{
+  if(mode!=='pan'||e.touches.length!==1) return;
+  isPanning=true;
+  const t=e.touches[0];
+  startX=t.clientX; startY=t.clientY;
+  startPanX=panX; startPanY=panY;
+},{passive:true});
+wrap.addEventListener('touchmove',e=>{
+  if(!isPanning||e.touches.length!==1) return;
+  const t=e.touches[0];
+  panX=startPanX+(t.clientX-startX);
+  panY=startPanY+(t.clientY-startY);
+  applyTransform();
+},{passive:true});
+wrap.addEventListener('touchend',()=>isPanning=false);
+
+wrap.addEventListener('wheel',e=>{
+  e.preventDefault();
+  const factor = e.deltaY < 0 ? 1.1 : 0.9;
+  const rect = wrap.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+  const newScale = Math.min(Math.max(scale*factor,0.15),3);
+  panX = mx - (mx-panX)*(newScale/scale);
+  panY = my - (my-panY)*(newScale/scale);
+  scale = newScale;
+  applyTransform();
+},{passive:false});
+
+window.addEventListener('keydown',e=>{
+  if(e.key==='p'||e.key==='Escape') setMode('pan');
+  if(e.key==='d') setMode('draw');
+  if(e.key==='='||e.key==='+') zoomIn();
+  if(e.key==='-') zoomOut();
+  if(e.key==='0') zoomReset();
+  if(e.key>='1'&&e.key<='7') goTo(parseInt(e.key)-1);
+});
+
+buildCanvas();
+initDraw();
+goTo(0);
+</script>
+</body>
+</html>
